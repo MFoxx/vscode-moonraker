@@ -1,0 +1,228 @@
+{
+  "name": "vscode-moonraker",
+  "displayName": "Moonraker 3D Printer Monitor",
+  "description": "Monitor your Klipper/Moonraker 3D printer directly in VS Code — temperatures, progress, live toolhead position, and printer controls in the sidebar.",
+  "version": "0.1.0",
+  "publisher": "mfoxx",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mfoxx/vscode-moonraker"
+  },
+  "icon": "media/printer.png",
+  "galleryBanner": {
+    "color": "#1e2127",
+    "theme": "dark"
+  },
+  "keywords": [
+    "3d printer",
+    "3d printing",
+    "moonraker",
+    "prusa",
+    "bambu",
+    "klipper",
+    "mainsail",
+    "fluidd",
+    "printer",
+    "ender",
+    "voron"
+  ],
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "moonraker.connect",
+        "title": "Moonraker: Connect to Printer"
+      },
+      {
+        "command": "moonraker.disconnect",
+        "title": "Moonraker: Disconnect from Printer"
+      },
+      {
+        "command": "moonraker.reconnect",
+        "title": "Moonraker: Reconnect to Printer"
+      },
+      {
+        "command": "moonraker.openWebUI",
+        "title": "Moonraker: Open Web UI"
+      },
+      {
+        "command": "moonraker.emergencyStop",
+        "title": "Moonraker: Emergency Stop"
+      },
+      {
+        "command": "moonraker.homeAxes",
+        "title": "Moonraker: Home All Axes (G28)"
+      },
+      {
+        "command": "moonraker.heatBed",
+        "title": "Moonraker: Set Bed Temperature"
+      },
+      {
+        "command": "moonraker.heatExtruder",
+        "title": "Moonraker: Set Extruder Temperature"
+      },
+      {
+        "command": "moonraker.setSpeedFactor",
+        "title": "Moonraker: Set Print Speed Factor"
+      },
+      {
+        "command": "moonraker.setFanSpeed",
+        "title": "Moonraker: Set Fan Speed"
+      }
+    ],
+    "configuration": {
+      "title": "Moonraker",
+      "properties": {
+        "moonraker.apiUrl": {
+          "type": "string",
+          "default": "http://localhost",
+          "description": "Moonraker API URL (without port, e.g. http://192.168.1.100)"
+        },
+        "moonraker.port": {
+          "type": "number",
+          "default": 7125,
+          "description": "Moonraker API port (default: 7125)"
+        },
+        "moonraker.pollingInterval": {
+          "type": "number",
+          "default": 2000,
+          "minimum": 500,
+          "description": "Polling interval in milliseconds"
+        },
+        "moonraker.temperatureHistorySize": {
+          "type": "number",
+          "default": 120,
+          "minimum": 10,
+          "maximum": 500,
+          "description": "Number of temperature data points to keep in history"
+        },
+        "moonraker.chamberSensorName": {
+          "type": "string",
+          "default": "",
+          "description": "Klipper temperature_sensor name for chamber (e.g. \"chamber\"). Leave empty to disable."
+        },
+        "moonraker.statusBar.showStatus": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show printer state in status bar"
+        },
+        "moonraker.statusBar.showFileName": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show current file name in status bar (only while printing)"
+        },
+        "moonraker.statusBar.showHotendTemp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show hotend temperature in status bar"
+        },
+        "moonraker.statusBar.showBedTemp": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show bed temperature in status bar"
+        },
+        "moonraker.statusBar.showETA": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show ETA in status bar (only while printing)"
+        },
+        "moonraker.statusBar.showTotalTime": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show total elapsed print time in status bar (only while printing)"
+        },
+        "moonraker.notifications.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Show VS Code notifications when the printer state changes (print started, finished, paused, etc.)"
+        },
+        "moonraker.webUiUrl": {
+          "type": "string",
+          "default": "",
+          "description": "URL of your Mainsail or Fluidd interface (e.g. http://192.168.1.100). When set, a button to open it in the browser appears in the sidebar."
+        },
+        "moonraker.webUiLabel": {
+          "type": "string",
+          "default": "Open Web UI",
+          "description": "Label shown on the sidebar web UI button (e.g. \"Open Mainsail\" or \"Open Fluidd\")"
+        },
+        "moonraker.experimental.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Enable experimental printer controls in the sidebar (emergency stop, homing, temperature adjustment, speed/fan control). Use with caution."
+        },
+        "moonraker.experimental.positionVisualization": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show a real-time top-down bed view with the toolhead position in the sidebar. Requires moonraker.experimental.enabled."
+        },
+        "moonraker.bedWidth": {
+          "type": "number",
+          "default": 235,
+          "minimum": 10,
+          "description": "Bed width in mm, used for the toolhead position visualization."
+        },
+        "moonraker.bedHeight": {
+          "type": "number",
+          "default": 235,
+          "minimum": 10,
+          "description": "Bed height (Y axis) in mm, used for the toolhead position visualization."
+        },
+        "moonraker.positionPollingInterval": {
+          "type": "number",
+          "default": 100,
+          "minimum": 50,
+          "description": "Polling interval in milliseconds for the toolhead position visualization."
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "moonraker-sidebar",
+          "title": "Moonraker 3D Printer",
+          "icon": "media/printer.svg"
+        }
+      ]
+    },
+    "views": {
+      "moonraker-sidebar": [
+        {
+          "type": "webview",
+          "id": "moonraker.sidebarView",
+          "name": "Printer Monitor"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run bundle",
+    "compile": "node esbuild.js",
+    "watch": "node esbuild.js --watch",
+    "bundle": "node esbuild.js --production",
+    "compile-tsc": "tsc --noEmit",
+    "test": "jest",
+    "deploy": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/jest": "^30.0.0",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "^1.85.0",
+    "@vscode/vsce": "^3.0.0",
+    "esbuild": "^0.27.3",
+    "jest": "^30.2.0",
+    "ts-jest": "^29.4.6",
+    "tslib": "^2.8.1",
+    "typescript": "^5.3.0"
+  }
+}
