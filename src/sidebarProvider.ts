@@ -33,6 +33,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         }
       } else if (msg.type === 'openWebUI') {
         void vscode.commands.executeCommand('moonraker.openWebUI');
+      } else if (msg.type === 'openBmac') {
+        void vscode.env.openExternal(vscode.Uri.parse('https://www.buymeacoffee.com/MFoxx'));
       } else if (msg.type === 'executeCommand') {
         const args: unknown[] = Array.isArray(msg.args) ? msg.args : [];
         void vscode.commands.executeCommand(msg.command as string, ...args);
@@ -273,7 +275,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       color: var(--vscode-descriptionForeground);
       margin-bottom: 5px;
     }
-    .chart-wrap { margin-bottom: 12px; }
+    .chart-wrap { margin-top: 5px; }
     canvas {
       width: 100%;
       display: block;
@@ -297,9 +299,13 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       vertical-align: middle;
     }
 
-    /* ── Print history ────────────────────────────────────────── */
-    details.history-section { margin-top: 4px; }
-    details.history-section summary {
+    /* ── Collapsible sections ─────────────────────────────────── */
+    details.collapsible-section {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid var(--vscode-input-border, #2a2a2a);
+    }
+    details.collapsible-section summary {
       list-style: none;
       cursor: pointer;
       font-size: 9px;
@@ -312,14 +318,14 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       gap: 5px;
       user-select: none;
     }
-    details.history-section summary::-webkit-details-marker { display: none; }
-    details.history-section summary::before {
+    details.collapsible-section summary::-webkit-details-marker { display: none; }
+    details.collapsible-section summary::before {
       content: '\u25B6';
       font-size: 7px;
       display: inline-block;
       transition: transform 0.15s;
     }
-    details.history-section[open] summary::before { transform: rotate(90deg); }
+    details.collapsible-section[open] summary::before { transform: rotate(90deg); }
     .history-entry {
       display: grid;
       grid-template-columns: 1fr auto auto;
@@ -356,16 +362,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       width: 100%;
       margin-bottom: 10px;
       padding: 6px 10px;
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-      border: none;
-      border-radius: 4px;
-      font-size: 12px;
+      background: var(--vscode-button-secondaryBackground, #3a3a3a);
+      color: var(--vscode-button-secondaryForeground, #ccc);
+      border: 1px solid var(--vscode-input-border, #555);
+      border-radius: 3px;
+      font-size: 11px;
       font-family: var(--vscode-font-family);
       cursor: pointer;
       text-align: center;
     }
-    .webui-btn:hover { background: var(--vscode-button-hoverBackground); }
+    .webui-btn:hover { opacity: 0.85; }
 
     /* ── Experimental controls ────────────────────────────────── */
     .ctrl-section {
@@ -437,15 +443,39 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       text-align: center;
     }
     .ctrl-btn-danger:hover { background: #6a2020; }
+
+    /* ── Buy me a coffee footer ───────────────────────────────── */
+    .bmac-footer {
+      margin-top: 18px;
+      padding-top: 10px;
+      border-top: 1px solid var(--vscode-input-border, #2a2a2a);
+      text-align: center;
+      font-size: 10px;
+      color: var(--vscode-descriptionForeground);
+      opacity: 0.6;
+    }
+    .bmac-footer a {
+      color: inherit;
+      text-decoration: none;
+      cursor: pointer;
+    }
+    .bmac-footer a:hover { opacity: 0.9; text-decoration: underline; }
   </style>
 </head>
 <body>
   <div id="root"></div>
   <div id="controls-root"></div>
+  <div class="bmac-footer">
+    Enjoying the extension? <a id="bmac-link">Buy me a coffee ☕</a>
+  </div>
 
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     vscode.postMessage({ type: 'ready' });
+
+    document.getElementById('bmac-link').addEventListener('click', function() {
+      vscode.postMessage({ type: 'openBmac' });
+    });
 
     const WEB_UI_URL           = ${JSON.stringify(webUiUrl)};
     const WEB_UI_LABEL         = ${JSON.stringify(webUiLabel)};
@@ -466,13 +496,22 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       });
     }
 
-    function attachHistoryToggle() {
-      const details = document.getElementById('history-details');
-      if (!details) return;
-      details.addEventListener('toggle', function() {
-        const state = vscode.getState() || {};
-        vscode.setState(Object.assign({}, state, { historyOpen: details.open }));
-      });
+    function attachSectionToggles() {
+      function saveToggle(id, key) {
+        const el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener('toggle', function() {
+          const state = vscode.getState() || {};
+          vscode.setState(Object.assign({}, state, { [key]: el.open }));
+          // Redraw chart when Temperature History is opened (canvas was hidden)
+          if (id === 'temp-details' && el.open && lastState) {
+            drawChart(document.getElementById('chart'), lastState.tempHistory);
+          }
+        });
+      }
+      saveToggle('temp-details',    'tempOpen');
+      saveToggle('pos-details',     'posOpen');
+      saveToggle('history-details', 'historyOpen');
     }
 
     // ── Experimental controls ────────────────────────────────────────────────
@@ -491,7 +530,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const isIdle     = mode === 'idle';
       const isPrinting = mode === 'printing';
 
-      let html = '<div class="ctrl-section"><div class="section-label">Controls</div>';
+      const savedState = vscode.getState() || {};
+      const ctrlOpenAttr = savedState.ctrlOpen !== false ? ' open' : '';
+      let html = '<details id="ctrl-details" class="collapsible-section"' + ctrlOpenAttr + '>' +
+        '<summary>Controls</summary>';
 
       // Emergency Stop — always visible when connected
       html += '<div class="ctrl-group">' +
@@ -550,12 +592,18 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           '</div></div>';
       }
 
-      html += '</div>';
+      html += '</details>';
       return html;
     }
 
     function attachControls() {
       if (!EXPERIMENTAL_ENABLED) return;
+
+      var ctrlDetails = document.getElementById('ctrl-details');
+      if (ctrlDetails) ctrlDetails.addEventListener('toggle', function() {
+        const state = vscode.getState() || {};
+        vscode.setState(Object.assign({}, state, { ctrlOpen: ctrlDetails.open }));
+      });
 
       function postGcode(script) {
         vscode.postMessage({ type: 'executeCommand', command: 'moonraker.sendGcodeScript', args: [script] });
@@ -956,27 +1004,31 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
 
       // Temperature chart
-      html += '<div class="chart-wrap">' +
-        '<div class="section-label">Temperature History</div>' +
+      const savedState = vscode.getState() || {};
+      const tempOpenAttr = savedState.tempOpen !== false ? ' open' : '';
+      html += '<details id="temp-details" class="collapsible-section"' + tempOpenAttr + '>' +
+        '<summary>Temperature History</summary>' +
+        '<div class="chart-wrap">' +
         '<canvas id="chart"></canvas>' +
         '<div class="legend">' +
         '<span><span class="legend-line" style="background:#e06c75"></span>Hotend</span>' +
         '<span><span class="legend-line" style="background:#61afef"></span>Bed</span>' +
-        '</div></div>';
+        '</div></div>' +
+        '</details>';
 
       // Position visualization
       if (POS_VIZ_ENABLED) {
-        html += '<div class="chart-wrap">' +
-          '<div class="section-label">Toolhead Position</div>' +
-          '<canvas id="pos-canvas"></canvas>' +
-          '</div>';
+        const posOpenAttr = savedState.posOpen !== false ? ' open' : '';
+        html += '<details id="pos-details" class="collapsible-section"' + posOpenAttr + '>' +
+          '<summary>Toolhead Position</summary>' +
+          '<div class="chart-wrap"><canvas id="pos-canvas"></canvas></div>' +
+          '</details>';
       }
 
       // Print history (collapsible)
       if (printHistory && printHistory.length) {
-        const savedState = vscode.getState() || {};
         const openAttr = savedState.historyOpen ? ' open' : '';
-        html += '<details id="history-details" class="history-section"' + openAttr + '>' +
+        html += '<details id="history-details" class="collapsible-section"' + openAttr + '>' +
           '<summary>Recent Prints</summary>';
         printHistory.forEach(function(j) {
           const ok   = j.status === 'completed';
@@ -993,7 +1045,7 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
       document.getElementById('root').innerHTML = html;
       attachWebuiBtn();
-      attachHistoryToggle();
+      attachSectionToggles();
       drawChart(document.getElementById('chart'), tempHistory);
     }
 

@@ -5,8 +5,15 @@ import { SidebarProvider } from './sidebarProvider';
 
 let client: MoonrakerClient | undefined;
 
-function notifyStateChange(prev: PrinterState | undefined, status: PrinterStatus): void {
+function notifyStateChange(
+  prev: PrinterState | undefined,
+  status: PrinterStatus,
+  outputChannel: vscode.OutputChannel,
+): void {
   if (prev === undefined || prev === status.state) { return; }
+
+  outputChannel.appendLine(`State: ${prev} → ${status.state}`);
+
   if (!vscode.workspace.getConfiguration('moonraker').get<boolean>('notifications.enabled', true)) { return; }
 
   const curr = status.state;
@@ -42,7 +49,7 @@ export function activate(context: vscode.ExtensionContext): void {
   let lastPrinterState: PrinterState | undefined;
 
   client.on('status', (status, tempHistory) => {
-    notifyStateChange(lastPrinterState, status);
+    notifyStateChange(lastPrinterState, status, outputChannel);
     lastPrinterState = status.state;
     statusBar.update(status);
     sidebar.update(status, tempHistory);
