@@ -13,3 +13,4 @@ esbuild.js
 **/*.map
 PLAN.md
 REQUIREEMENTS.md
+/images/

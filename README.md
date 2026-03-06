@@ -23,7 +23,7 @@
     <img src="https://img.shields.io/github/actions/workflow/status/mfoxx/vscode-moonraker/ci.yml?style=flat-square&label=CI" alt="CI Status">
   </a>
   <a href="LICENSE">
-    <img src="https://img.shields.io/github/license/mfoxx/vscode-moonraker?style=flat-square" alt="License">
+    <img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="License">
   </a>
 </p>
 
@@ -33,8 +33,15 @@
   <a href="#-quick-start">Quick Start</a> •
   <a href="#%EF%B8%8F-configuration">Configuration</a> •
   <a href="#-experimental-features">Experimental</a> •
+  <a href="#%EF%B8%8F-planned-features">Roadmap</a> •
   <a href="#-contributing">Contributing</a> •
   <a href="#-support">Support</a>
+</p>
+
+---
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/mfoxx/vscode-moonraker/main/images/preview.png" alt="Moonraker 3D Printer Monitor preview" width="400">
 </p>
 
 ---
@@ -67,6 +74,20 @@ Configure your Mainsail or Fluidd URL once and get a **one-click button** in the
 
 ### 📍 Status Bar Integration
 Keep an eye on your printer without even opening the sidebar. The **status bar** shows printer state, temperatures, filename, ETA, and elapsed time. Every item is individually configurable — show only what matters to you.
+
+---
+
+## 🗺️ Planned Features
+
+These are features actively planned for future releases. Have a suggestion? [Open an issue!](https://github.com/mfoxx/vscode-moonraker/issues)
+
+| Feature | Description |
+|---|---|
+| 🔐 **Authentication / API token** | Connect to Moonraker instances secured with an API key or trusted clients config |
+| 📷 **Webcam snapshot** | Display a periodically refreshed camera image in the sidebar so you can see your print at a glance |
+| 🎛️ **Klipper macro buttons** | Auto-discover and expose your custom Klipper macros as one-click sidebar buttons |
+| 🖨️ **Multi-printer support** | Monitor and switch between multiple printers from a single VS Code sidebar |
+| ▶️ **Print queue & quick-start** | Browse files already on the printer and start or queue a print without opening the web UI |
 
 ---
 
