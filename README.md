@@ -41,7 +41,7 @@
 ---
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/mfoxx/vscode-moonraker/main/images/preview.png" alt="Moonraker 3D Printer Monitor preview" width="400">
+  <img src="https://raw.githubusercontent.com/mfoxx/vscode-moonraker/main/images/preview.png" alt="Moonraker 3D Printer Monitor preview" width="100%">
 </p>
 
 ---
