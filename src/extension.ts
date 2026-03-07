@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { MoonrakerClient, PrinterState, PrinterStatus, ToolheadPosition } from './moonrakerClient';
 import { StatusBarManager } from './statusBar';
 import { SidebarProvider } from './sidebarProvider';
+import { MoonrakerFileSystemProvider, browseConfigFiles, promptFirmwareRestart } from './configFileProvider';
 
 let client: MoonrakerClient | undefined;
 
@@ -46,6 +47,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.window.registerWebviewViewProvider('moonraker.sidebarView', sidebar),
   );
 
+  const fsProvider = new MoonrakerFileSystemProvider(client);
+  context.subscriptions.push(
+    vscode.workspace.registerFileSystemProvider('moonraker', fsProvider, { isCaseSensitive: true }),
+    promptFirmwareRestart(client),
+  );
+
   let lastPrinterState: PrinterState | undefined;
 
   client.on('status', (status, tempHistory) => {
@@ -57,6 +64,14 @@ export function activate(context: vscode.ExtensionContext): void {
 
   client.on('printHistory', (entries) => {
     sidebar.setPrintHistory(entries);
+  });
+
+  client.on('macros', (macros) => {
+    sidebar.setMacros(macros);
+  });
+
+  client.on('jobQueue', (queueStatus) => {
+    sidebar.setJobQueue(queueStatus);
   });
 
   client.on('position', (pos: ToolheadPosition) => {
@@ -167,6 +182,39 @@ export function activate(context: vscode.ExtensionContext): void {
       try { await client?.sendGcode(`M220 S${Number(input)}`); }
       catch (e) { void vscode.window.showErrorMessage(`Set speed factor failed: ${e}`); }
     }),
+    vscode.commands.registerCommand('moonraker.showLogs', async () => {
+      if (!client) { return; }
+      try {
+        const files = await client.fetchLogFiles();
+        if (!files.length) {
+          void vscode.window.showInformationMessage('No log files found on the printer.');
+          return;
+        }
+        files.sort((a, b) => b.modified - a.modified);
+        const picked = await vscode.window.showQuickPick(
+          files.map((f) => ({
+            label: f.filename,
+            description: `${(f.size / 1024).toFixed(1)} KB`,
+            detail: new Date(f.modified * 1000).toLocaleString(),
+            filename: f.filename,
+          })),
+          { title: 'Moonraker: Select Log File', placeHolder: 'Choose a log file to view' },
+        );
+        if (!picked) { return; }
+        const content = await vscode.window.withProgress(
+          { location: vscode.ProgressLocation.Notification, title: `Fetching ${picked.filename}…` },
+          () => client!.fetchLogContent(picked.filename),
+        );
+        const doc = await vscode.workspace.openTextDocument({ content, language: 'log' });
+        await vscode.window.showTextDocument(doc, { preview: false });
+      } catch (e) {
+        void vscode.window.showErrorMessage(`Failed to fetch logs: ${e}`);
+      }
+    }),
+    vscode.commands.registerCommand('moonraker.browseConfigFiles', () => {
+      if (!client) { return; }
+      return browseConfigFiles(client);
+    }),
     vscode.commands.registerCommand('moonraker.setFanSpeed', async () => {
       const input = await vscode.window.showInputBox({
         title: 'Set Fan Speed',
@@ -181,6 +229,48 @@ export function activate(context: vscode.ExtensionContext): void {
       try { await client?.sendGcode(`M106 S${s}`); }
       catch (e) { void vscode.window.showErrorMessage(`Set fan speed failed: ${e}`); }
     }),
+    vscode.commands.registerCommand('moonraker.addToQueue', async () => {
+      if (!client) { return; }
+      try {
+        const files = await client.fetchGcodeFiles();
+        if (!files.length) {
+          void vscode.window.showInformationMessage('No GCode files found on the printer.');
+          return;
+        }
+        files.sort((a, b) => b.modified - a.modified);
+        const picks = await vscode.window.showQuickPick(
+          files.map((f) => ({
+            label: f.path,
+            description: `${(f.size / 1024).toFixed(1)} KB`,
+          })),
+          { title: 'Add to Print Queue', placeHolder: 'Select GCode file(s) to queue', canPickMany: true },
+        );
+        if (!picks || !picks.length) { return; }
+        await client.enqueueJobs(picks.map((p) => p.label));
+      } catch (e) {
+        void vscode.window.showErrorMessage(`Failed to add to queue: ${e}`);
+      }
+    }),
+    vscode.commands.registerCommand('moonraker.removeFromQueue', async (jobId: string) => {
+      if (!client || !jobId) { return; }
+      try { await client.removeFromQueue([jobId]); }
+      catch (e) { void vscode.window.showErrorMessage(`Failed to remove from queue: ${e}`); }
+    }),
+    vscode.commands.registerCommand('moonraker.clearQueue', async () => {
+      if (!client) { return; }
+      try { await client.clearJobQueue(); }
+      catch (e) { void vscode.window.showErrorMessage(`Failed to clear queue: ${e}`); }
+    }),
+    vscode.commands.registerCommand('moonraker.startQueue', async () => {
+      if (!client) { return; }
+      try { await client.startQueue(); }
+      catch (e) { void vscode.window.showErrorMessage(`Failed to start queue: ${e}`); }
+    }),
+    vscode.commands.registerCommand('moonraker.pauseQueue', async () => {
+      if (!client) { return; }
+      try { await client.pauseQueue(); }
+      catch (e) { void vscode.window.showErrorMessage(`Failed to pause queue: ${e}`); }
+    }),
   );
 
   context.subscriptions.push(
@@ -189,6 +279,7 @@ export function activate(context: vscode.ExtensionContext): void {
         if (
           e.affectsConfiguration('moonraker.apiUrl') ||
           e.affectsConfiguration('moonraker.port')   ||
+          e.affectsConfiguration('moonraker.apiKey')  ||
           e.affectsConfiguration('moonraker.chamberSensorName')
         ) {
           client?.reconnect();

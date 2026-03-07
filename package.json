@@ -2,7 +2,7 @@
   "name": "vscode-moonraker",
   "displayName": "Moonraker 3D Printer Monitor",
   "description": "Monitor your Klipper/Moonraker 3D printer directly in VS Code — temperatures, progress, live toolhead position, and printer controls in the sidebar.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "publisher": "mfoxx",
   "license": "MIT",
   "repository": {
@@ -78,6 +78,14 @@
       {
         "command": "moonraker.setFanSpeed",
         "title": "Moonraker: Set Fan Speed"
+      },
+      {
+        "command": "moonraker.showLogs",
+        "title": "Moonraker: Show Printer Logs"
+      },
+      {
+        "command": "moonraker.browseConfigFiles",
+        "title": "Moonraker: Edit Printer Config File"
       }
     ],
     "configuration": {
@@ -92,6 +100,11 @@
           "type": "number",
           "default": 7125,
           "description": "Moonraker API port (default: 7125)"
+        },
+        "moonraker.apiKey": {
+          "type": "string",
+          "default": "",
+          "markdownDescription": "Moonraker API key for authenticated instances. Find it in your Moonraker web UI under **Access** → **API Keys**, or in `moonraker.conf` under `[authorization]`."
         },
         "moonraker.pollingInterval": {
           "type": "number",

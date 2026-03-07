@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { PrinterStatus, TemperaturePoint, PrintHistoryEntry, ToolheadPosition } from './moonrakerClient';
+import { PrinterStatus, TemperaturePoint, PrintHistoryEntry, ToolheadPosition, JobQueueStatus } from './moonrakerClient';
 
 function getNonce(): string {
   let text = '';
@@ -13,6 +13,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
   private lastStatus?: PrinterStatus;
   private lastTempHistory?: TemperaturePoint[];
   private lastPrintHistory: PrintHistoryEntry[] = [];
+  private lastMacros: string[] = [];
+  private lastJobQueue?: JobQueueStatus;
 
   constructor(private readonly extensionUri: vscode.Uri) {}
 
@@ -28,16 +30,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       if (msg.type === 'ready') {
         if (this.lastStatus && this.lastTempHistory) {
           this.send(this.lastStatus, this.lastTempHistory, this.lastPrintHistory);
+          if (this.lastMacros.length) {
+            this.view?.webview.postMessage({ type: 'macros', macros: this.lastMacros });
+          }
+          if (this.lastJobQueue) {
+            this.view?.webview.postMessage({ type: 'jobQueue', ...this.lastJobQueue });
+          }
         } else {
           this.sendDisconnected();
         }
       } else if (msg.type === 'openWebUI') {
         void vscode.commands.executeCommand('moonraker.openWebUI');
+      } else if (msg.type === 'showLogs') {
+        void vscode.commands.executeCommand('moonraker.showLogs');
       } else if (msg.type === 'openBmac') {
         void vscode.env.openExternal(vscode.Uri.parse('https://www.buymeacoffee.com/MFoxx'));
       } else if (msg.type === 'executeCommand') {
         const args: unknown[] = Array.isArray(msg.args) ? msg.args : [];
         void vscode.commands.executeCommand(msg.command as string, ...args);
+      } else if (msg.type === 'runMacro') {
+        void vscode.commands.executeCommand('moonraker.sendGcodeScript', msg.macro as string);
       }
     });
   }
@@ -53,6 +65,16 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     if (this.lastStatus && this.lastTempHistory) {
       this.send(this.lastStatus, this.lastTempHistory, entries);
     }
+  }
+
+  setMacros(macros: string[]): void {
+    this.lastMacros = macros;
+    this.view?.webview.postMessage({ type: 'macros', macros });
+  }
+
+  setJobQueue(status: JobQueueStatus): void {
+    this.lastJobQueue = status;
+    this.view?.webview.postMessage({ type: 'jobQueue', ...status });
   }
 
   setDisconnected(): void {
@@ -347,6 +369,70 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     .h-status-ok  { color: #98c379; }
     .h-status-err { color: #e06c75; }
 
+    /* ── Job queue ────────────────────────────────────────────── */
+    .queue-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .queue-state {
+      font-size: 9px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 2px 7px;
+      border-radius: 8px;
+    }
+    .queue-state-ready    { background: #2d5a27; color: #98c379; }
+    .queue-state-paused   { background: #5a4a1a; color: #e5c07b; }
+    .queue-state-loading,
+    .queue-state-starting { background: #1a3a5a; color: #61afef; }
+    .queue-actions {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 8px;
+    }
+    .queue-actions .ctrl-btn { font-size: 10px; padding: 4px 8px; }
+    .queue-entry {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 0;
+      border-bottom: 1px solid var(--vscode-input-border, #2a2a2a);
+      font-size: 11px;
+    }
+    .queue-entry:last-child { border-bottom: none; }
+    .queue-idx {
+      flex-shrink: 0;
+      width: 16px;
+      text-align: right;
+      color: var(--vscode-descriptionForeground);
+      font-size: 10px;
+    }
+    .queue-name {
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .queue-remove {
+      flex-shrink: 0;
+      background: none;
+      border: none;
+      color: var(--vscode-descriptionForeground);
+      cursor: pointer;
+      font-size: 13px;
+      padding: 0 2px;
+      line-height: 1;
+    }
+    .queue-remove:hover { color: #e06c75; }
+    .queue-empty {
+      font-size: 11px;
+      color: var(--vscode-descriptionForeground);
+      font-style: italic;
+    }
+
     /* ── Disconnected state ───────────────────────────────────── */
     .disconnected {
       text-align: center;
@@ -356,11 +442,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     .disconnected .d-icon { font-size: 32px; margin-bottom: 10px; }
     .disconnected .d-msg  { font-size: 12px; line-height: 1.6; }
 
-    /* ── Web UI button ────────────────────────────────────────── */
-    .webui-btn {
-      display: block;
-      width: 100%;
-      margin-bottom: 10px;
+    /* ── Top action buttons ─────────────────────────────────── */
+    .top-actions { display: flex; gap: 6px; margin-bottom: 10px; }
+    .top-actions .action-btn {
+      flex: 1;
       padding: 6px 10px;
       background: var(--vscode-button-secondaryBackground, #3a3a3a);
       color: var(--vscode-button-secondaryForeground, #ccc);
@@ -371,7 +456,8 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       cursor: pointer;
       text-align: center;
     }
-    .webui-btn:hover { opacity: 0.85; }
+    .top-actions .action-btn:hover { opacity: 0.85; }
+    .top-actions .action-btn:only-child { flex: 1 1 100%; }
 
     /* ── Experimental controls ────────────────────────────────── */
     .ctrl-section {
@@ -444,6 +530,26 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     }
     .ctrl-btn-danger:hover { background: #6a2020; }
 
+    /* ── Macro buttons ───────────────────────────────────────── */
+    .macro-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 6px;
+    }
+    .macro-btn {
+      padding: 5px 10px;
+      background: var(--vscode-button-secondaryBackground, #3a3a3a);
+      color: var(--vscode-button-secondaryForeground, #ccc);
+      border: 1px solid var(--vscode-input-border, #555);
+      border-radius: 3px;
+      font-size: 11px;
+      font-family: var(--vscode-font-family);
+      cursor: pointer;
+      text-align: center;
+    }
+    .macro-btn:hover { opacity: 0.85; }
+
     /* ── Buy me a coffee footer ───────────────────────────────── */
     .bmac-footer {
       margin-top: 18px;
@@ -464,7 +570,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 </head>
 <body>
   <div id="root"></div>
+  <div id="queue-root"></div>
+  <div id="macros-root"></div>
   <div id="controls-root"></div>
+  <div id="history-root"></div>
   <div class="bmac-footer">
     Enjoying the extension? <a id="bmac-link">Buy me a coffee ☕</a>
   </div>
@@ -484,15 +593,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
     const BED_WIDTH            = ${JSON.stringify(bedWidth)};
     const BED_HEIGHT           = ${JSON.stringify(bedHeight)};
 
-    function webuiBtn() {
-      if (!WEB_UI_URL) return '';
-      return '<button class="webui-btn" id="webui-btn">' + WEB_UI_LABEL + '</button>';
+    function topActions() {
+      var btns = '';
+      if (WEB_UI_URL) btns += '<button class="action-btn" id="webui-btn">' + WEB_UI_LABEL + '</button>';
+      btns += '<button class="action-btn" id="logs-btn">Show Logs</button>';
+      return '<div class="top-actions">' + btns + '</div>';
     }
 
-    function attachWebuiBtn() {
-      const btn = document.getElementById('webui-btn');
+    function attachTopActions() {
+      var btn = document.getElementById('webui-btn');
       if (btn) btn.addEventListener('click', function() {
         vscode.postMessage({ type: 'openWebUI' });
+      });
+      var logsBtn = document.getElementById('logs-btn');
+      if (logsBtn) logsBtn.addEventListener('click', function() {
+        vscode.postMessage({ type: 'showLogs' });
       });
     }
 
@@ -511,7 +626,6 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       }
       saveToggle('temp-details',    'tempOpen');
       saveToggle('pos-details',     'posOpen');
-      saveToggle('history-details', 'historyOpen');
     }
 
     // ── Experimental controls ────────────────────────────────────────────────
@@ -914,12 +1028,12 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
 
     function renderDisconnected() {
       document.getElementById('root').innerHTML =
-        webuiBtn() +
+        topActions() +
         '<div class="disconnected">' +
         '<div class="d-icon">⚡</div>' +
         '<div class="d-msg">Not connected to Moonraker.<br>Check your settings.</div>' +
         '</div>';
-      attachWebuiBtn();
+      attachTopActions();
     }
 
     function chip(label, value) {
@@ -934,10 +1048,10 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
         '</div>';
     }
 
-    function renderStatus(status, tempHistory, printHistory) {
+    function renderStatus(status, tempHistory) {
       const p = status;
       const isPrinting = p.state === 'printing' || p.state === 'paused';
-      let html = webuiBtn();
+      let html = topActions();
 
       // Thumbnail
       if (isPrinting && p.thumbnailData) {
@@ -1025,28 +1139,155 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
           '</details>';
       }
 
-      // Print history (collapsible)
-      if (printHistory && printHistory.length) {
-        const openAttr = savedState.historyOpen ? ' open' : '';
-        html += '<details id="history-details" class="collapsible-section"' + openAttr + '>' +
-          '<summary>Recent Prints</summary>';
-        printHistory.forEach(function(j) {
-          const ok   = j.status === 'completed';
-          const icon = ok ? '<span class="h-status-ok">\u2713</span>' : '<span class="h-status-err">\u2717</span>';
-          const name = j.filename.replace(/\\.gcode$/i, '');
-          html += '<div class="history-entry">' +
-            '<span class="h-name" title="' + j.filename + '">' + icon + ' ' + name + '</span>' +
-            '<span class="h-duration">' + fmtSec(j.totalDuration) + '</span>' +
-            '<span class="h-date">' + timeAgo(j.startTime) + '</span>' +
-            '</div>';
-        });
-        html += '</details>';
-      }
-
       document.getElementById('root').innerHTML = html;
-      attachWebuiBtn();
+      attachTopActions();
       attachSectionToggles();
       drawChart(document.getElementById('chart'), tempHistory);
+    }
+
+    // ── Print history ───────────────────────────────────────────────────────
+
+    function renderPrintHistory(printHistory) {
+      var root = document.getElementById('history-root');
+      if (!root) return;
+      if (!printHistory || !printHistory.length) { root.innerHTML = ''; return; }
+
+      var savedState = vscode.getState() || {};
+      var openAttr = savedState.historyOpen ? ' open' : '';
+      var html = '<details id="history-details" class="collapsible-section"' + openAttr + '>' +
+        '<summary>Recent Prints</summary>';
+      printHistory.forEach(function(j) {
+        var ok   = j.status === 'completed';
+        var icon = ok ? '<span class="h-status-ok">\u2713</span>' : '<span class="h-status-err">\u2717</span>';
+        var name = j.filename.replace(/\\.gcode$/i, '');
+        html += '<div class="history-entry">' +
+          '<span class="h-name" title="' + j.filename + '">' + icon + ' ' + name + '</span>' +
+          '<span class="h-duration">' + fmtSec(j.totalDuration) + '</span>' +
+          '<span class="h-date">' + timeAgo(j.startTime) + '</span>' +
+          '</div>';
+      });
+      html += '</details>';
+      root.innerHTML = html;
+
+      var details = document.getElementById('history-details');
+      if (details) details.addEventListener('toggle', function() {
+        var state = vscode.getState() || {};
+        vscode.setState(Object.assign({}, state, { historyOpen: details.open }));
+      });
+    }
+
+    // ── Macro buttons ──────────────────────────────────────────────────────
+
+    function renderMacros(macros) {
+      if (!macros || !macros.length) {
+        document.getElementById('macros-root').innerHTML = '';
+        return;
+      }
+      var savedState = vscode.getState() || {};
+      var openAttr = savedState.macrosOpen ? ' open' : '';
+      var html = '<details id="macros-details" class="collapsible-section"' + openAttr + '>' +
+        '<summary>Macros</summary>' +
+        '<div class="macro-grid">';
+      macros.forEach(function(name) {
+        html += '<button class="macro-btn" data-macro="' + name + '">' + name + '</button>';
+      });
+      html += '</div></details>';
+      document.getElementById('macros-root').innerHTML = html;
+
+      var details = document.getElementById('macros-details');
+      if (details) details.addEventListener('toggle', function() {
+        var state = vscode.getState() || {};
+        vscode.setState(Object.assign({}, state, { macrosOpen: details.open }));
+      });
+
+      document.querySelectorAll('.macro-btn').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          vscode.postMessage({ type: 'runMacro', macro: btn.getAttribute('data-macro') });
+        });
+      });
+    }
+
+    // ── Job Queue ──────────────────────────────────────────────────────────
+
+    function renderJobQueue(queueState, queuedJobs) {
+      var root = document.getElementById('queue-root');
+      if (!root) return;
+      if (!queuedJobs) { root.innerHTML = ''; return; }
+
+      var savedState = vscode.getState() || {};
+      var openAttr = savedState.queueOpen ? ' open' : '';
+      var html = '<details id="queue-details" class="collapsible-section"' + openAttr + '>' +
+        '<summary>Job Queue</summary>';
+
+      // State badge
+      var stateClass = 'queue-state-' + queueState;
+      html += '<div class="queue-header">' +
+        '<span class="queue-state ' + stateClass + '">' + queueState + '</span>' +
+        '</div>';
+
+      // Action buttons
+      html += '<div class="queue-actions">';
+      html += '<button class="ctrl-btn" id="btn-queue-add">+ Add</button>';
+      if (queueState === 'paused') {
+        html += '<button class="ctrl-btn" id="btn-queue-start">\u25B6 Start</button>';
+      } else {
+        html += '<button class="ctrl-btn" id="btn-queue-pause">\u23F8 Pause</button>';
+      }
+      if (queuedJobs.length) {
+        html += '<button class="ctrl-btn" id="btn-queue-clear">Clear</button>';
+      }
+      html += '</div>';
+
+      // Job list
+      if (queuedJobs.length) {
+        queuedJobs.forEach(function(job, i) {
+          var name = job.filename.replace(/\.gcode$/i, '');
+          html += '<div class="queue-entry">' +
+            '<span class="queue-idx">' + (i + 1) + '</span>' +
+            '<span class="queue-name" title="' + job.filename + '">' + name + '</span>' +
+            '<button class="queue-remove" data-job-id="' + job.jobId + '" title="Remove">\u00D7</button>' +
+            '</div>';
+        });
+      } else {
+        html += '<div class="queue-empty">Queue is empty</div>';
+      }
+
+      html += '</details>';
+      root.innerHTML = html;
+
+      // Attach events
+      var details = document.getElementById('queue-details');
+      if (details) details.addEventListener('toggle', function() {
+        var state = vscode.getState() || {};
+        vscode.setState(Object.assign({}, state, { queueOpen: details.open }));
+      });
+
+      var addBtn = document.getElementById('btn-queue-add');
+      if (addBtn) addBtn.addEventListener('click', function() {
+        vscode.postMessage({ type: 'executeCommand', command: 'moonraker.addToQueue' });
+      });
+
+      var startBtn = document.getElementById('btn-queue-start');
+      if (startBtn) startBtn.addEventListener('click', function() {
+        vscode.postMessage({ type: 'executeCommand', command: 'moonraker.startQueue' });
+      });
+
+      var pauseBtn = document.getElementById('btn-queue-pause');
+      if (pauseBtn) pauseBtn.addEventListener('click', function() {
+        vscode.postMessage({ type: 'executeCommand', command: 'moonraker.pauseQueue' });
+      });
+
+      var clearBtn = document.getElementById('btn-queue-clear');
+      if (clearBtn) clearBtn.addEventListener('click', function() {
+        vscode.postMessage({ type: 'executeCommand', command: 'moonraker.clearQueue' });
+      });
+
+      document.querySelectorAll('.queue-remove').forEach(function(btn) {
+        btn.addEventListener('click', function() {
+          var jobId = btn.getAttribute('data-job-id');
+          vscode.postMessage({ type: 'executeCommand', command: 'moonraker.removeFromQueue', args: [jobId] });
+        });
+      });
     }
 
     // ── Message handling ─────────────────────────────────────────────────────
@@ -1057,13 +1298,21 @@ export class SidebarProvider implements vscode.WebviewViewProvider {
       const msg = event.data;
       if (msg.type === 'update') {
         lastState = msg;
-        renderStatus(msg.status, msg.tempHistory, msg.printHistory);
+        renderStatus(msg.status, msg.tempHistory);
+        renderPrintHistory(msg.printHistory);
         updateControlsIfNeeded(msg.status);
       } else if (msg.type === 'disconnected') {
         lastState = null;
         posA = null; posB = null;
         renderDisconnected();
         updateControlsIfNeeded(null);
+        document.getElementById('macros-root').innerHTML = '';
+        document.getElementById('queue-root').innerHTML = '';
+        document.getElementById('history-root').innerHTML = '';
+      } else if (msg.type === 'macros') {
+        renderMacros(msg.macros);
+      } else if (msg.type === 'jobQueue') {
+        renderJobQueue(msg.queueState, msg.queuedJobs);
       } else if (msg.type === 'position') {
         posA = posB;
         posATime = posBTime;

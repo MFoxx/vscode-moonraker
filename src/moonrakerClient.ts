@@ -46,12 +46,32 @@ export interface PrintHistoryEntry {
   filamentUsed: number;    // mm
 }
 
+export interface JobQueueEntry {
+  filename: string;
+  jobId: string;
+  timeAdded: number;       // epoch seconds
+  timeInQueue: number;     // seconds
+}
+
+export type JobQueueState = 'ready' | 'loading' | 'starting' | 'paused';
+
+export interface JobQueueStatus {
+  queueState: JobQueueState;
+  queuedJobs: JobQueueEntry[];
+}
+
+export interface GcodeFileInfo {
+  path: string;
+  modified: number;
+  size: number;
+}
+
 // ─── HTTP helpers ────────────────────────────────────────────────────────────
 
-function httpGet(url: string, timeoutMs = 5000): Promise<unknown> {
+function httpGet(url: string, timeoutMs = 5000, headers: Record<string, string> = {}): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    const req = mod.get(url, { timeout: timeoutMs }, (res) => {
+    const req = mod.get(url, { timeout: timeoutMs, headers }, (res) => {
       let data = '';
       res.on('data', (chunk: string) => (data += chunk));
       res.on('end', () => {
@@ -64,10 +84,10 @@ function httpGet(url: string, timeoutMs = 5000): Promise<unknown> {
   });
 }
 
-function httpGetBuffer(url: string): Promise<Buffer> {
+function httpGetBuffer(url: string, headers: Record<string, string> = {}): Promise<Buffer> {
   return new Promise((resolve, reject) => {
     const mod = url.startsWith('https') ? https : http;
-    const req = mod.get(url, { timeout: 8000 }, (res) => {
+    const req = mod.get(url, { timeout: 8000, headers }, (res) => {
       const chunks: Buffer[] = [];
       res.on('data', (chunk: Buffer) => chunks.push(Buffer.from(chunk)));
       res.on('end', () => resolve(Buffer.concat(chunks)));
@@ -77,7 +97,7 @@ function httpGetBuffer(url: string): Promise<Buffer> {
   });
 }
 
-function httpPost(url: string, body: Record<string, unknown>, timeoutMs = 5000): Promise<unknown> {
+function httpPost(url: string, body: Record<string, unknown>, timeoutMs = 5000, headers: Record<string, string> = {}): Promise<unknown> {
   return new Promise((resolve, reject) => {
     const bodyStr = JSON.stringify(body);
     const parsed = new URL(url);
@@ -91,6 +111,7 @@ function httpPost(url: string, body: Record<string, unknown>, timeoutMs = 5000):
         headers: {
           'Content-Type': 'application/json',
           'Content-Length': Buffer.byteLength(bodyStr),
+          ...headers,
         },
         timeout: timeoutMs,
       },
@@ -106,6 +127,94 @@ function httpPost(url: string, body: Record<string, unknown>, timeoutMs = 5000):
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
     req.write(bodyStr);
+    req.end();
+  });
+}
+
+function httpPostMultipart(
+  url: string,
+  fields: Record<string, string>,
+  file: { fieldName: string; filename: string; content: Buffer },
+  timeoutMs: number,
+  headers: Record<string, string>,
+): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const boundary = '----MoonrakerUpload' + Date.now().toString(36);
+    const parts: Buffer[] = [];
+
+    for (const [key, value] of Object.entries(fields)) {
+      parts.push(Buffer.from(
+        `--${boundary}\r\nContent-Disposition: form-data; name="${key}"\r\n\r\n${value}\r\n`,
+      ));
+    }
+
+    parts.push(Buffer.from(
+      `--${boundary}\r\nContent-Disposition: form-data; name="${file.fieldName}"; filename="${file.filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`,
+    ));
+    parts.push(file.content);
+    parts.push(Buffer.from(`\r\n--${boundary}--\r\n`));
+
+    const body = Buffer.concat(parts);
+    const parsed = new URL(url);
+    const mod = url.startsWith('https') ? https : http;
+
+    const req = mod.request(
+      {
+        hostname: parsed.hostname,
+        port: Number(parsed.port) || (url.startsWith('https') ? 443 : 80),
+        path: parsed.pathname + (parsed.search || ''),
+        method: 'POST',
+        headers: {
+          'Content-Type': `multipart/form-data; boundary=${boundary}`,
+          'Content-Length': body.length,
+          ...headers,
+        },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk: string) => (data += chunk));
+        res.on('end', () => {
+          if (res.statusCode && (res.statusCode < 200 || res.statusCode >= 300)) {
+            reject(new Error(`Upload failed (HTTP ${res.statusCode}): ${data}`));
+            return;
+          }
+          try { resolve(JSON.parse(data)); }
+          catch (e) { reject(new Error(`JSON parse error: ${e}`)); }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
+    req.write(body);
+    req.end();
+  });
+}
+
+function httpDelete(url: string, timeoutMs = 5000, headers: Record<string, string> = {}): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const mod = url.startsWith('https') ? https : http;
+    const req = mod.request(
+      {
+        hostname: parsed.hostname,
+        port: Number(parsed.port) || (url.startsWith('https') ? 443 : 80),
+        path: parsed.pathname + (parsed.search || ''),
+        method: 'DELETE',
+        headers: { ...headers },
+        timeout: timeoutMs,
+      },
+      (res) => {
+        let data = '';
+        res.on('data', (chunk: string) => (data += chunk));
+        res.on('end', () => {
+          try { resolve(JSON.parse(data)); }
+          catch (e) { reject(new Error(`JSON parse error: ${e}`)); }
+        });
+      },
+    );
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Request timed out')); });
     req.end();
   });
 }
@@ -129,7 +238,9 @@ export interface ToolheadPosition { x: number; y: number; z: number; }
 export declare interface MoonrakerClient {
   on(event: 'status',       listener: (status: PrinterStatus, tempHistory: TemperaturePoint[]) => void): this;
   on(event: 'printHistory', listener: (entries: PrintHistoryEntry[]) => void): this;
+  on(event: 'macros',       listener: (macros: string[]) => void): this;
   on(event: 'position',     listener: (pos: ToolheadPosition) => void): this;
+  on(event: 'jobQueue',     listener: (status: JobQueueStatus) => void): this;
   on(event: 'connected',    listener: () => void): this;
   on(event: 'disconnected', listener: () => void): this;
   on(event: 'error',        listener: (err: Error) => void): this;
@@ -181,6 +292,11 @@ export class MoonrakerClient extends EventEmitter {
     return vscode.workspace.getConfiguration('moonraker').get<number>('positionPollingInterval', 200);
   }
 
+  private get apiHeaders(): Record<string, string> {
+    const key = vscode.workspace.getConfiguration('moonraker').get<string>('apiKey', '').trim();
+    return key ? { 'X-Api-Key': key } : {};
+  }
+
   // ── Public API ──────────────────────────────────────────────────────────────
 
   connect(): void {
@@ -213,11 +329,120 @@ export class MoonrakerClient extends EventEmitter {
   async sendGcode(script: string): Promise<void> {
     // Moonraker's gcode/script endpoint is synchronous and waits for completion,
     // so long-running commands (e.g. G28) need a generous timeout.
-    await httpPost(`${this.baseUrl}/printer/gcode/script`, { script }, 120_000);
+    await httpPost(`${this.baseUrl}/printer/gcode/script`, { script }, 120_000, this.apiHeaders);
   }
 
   async emergencyStop(): Promise<void> {
-    await httpPost(`${this.baseUrl}/printer/emergency_stop`, {});
+    await httpPost(`${this.baseUrl}/printer/emergency_stop`, {}, 5000, this.apiHeaders);
+  }
+
+  async fetchLogFiles(): Promise<{ filename: string; modified: number; size: number }[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await httpGet(`${this.baseUrl}/server/files/directory?path=logs`, 5000, this.apiHeaders) as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data?.result?.files ?? []).map((f: any) => ({
+      filename: f.filename as string,
+      modified: f.modified as number,
+      size: f.size as number,
+    }));
+  }
+
+  async fetchLogContent(filename: string): Promise<string> {
+    const buf = await httpGetBuffer(
+      `${this.baseUrl}/server/files/logs/${encodeURIComponent(filename)}`,
+      this.apiHeaders,
+    );
+    return buf.toString('utf-8');
+  }
+
+  get isConnected(): boolean { return this.connected; }
+
+  async listFiles(root: string): Promise<Array<{ path: string; modified: number; size: number }>> {
+    const url = `${this.baseUrl}/server/files/list?root=${encodeURIComponent(root)}`;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await httpGet(url, 5000, this.apiHeaders) as any;
+    return data?.result ?? [];
+  }
+
+  async readFile(root: string, filePath: string): Promise<Buffer> {
+    const encodedPath = filePath.split('/').map(encodeURIComponent).join('/');
+    const url = `${this.baseUrl}/server/files/${encodeURIComponent(root)}/${encodedPath}`;
+    return httpGetBuffer(url, this.apiHeaders);
+  }
+
+  async writeFile(root: string, filePath: string, content: Buffer): Promise<void> {
+    const url = `${this.baseUrl}/server/files/upload`;
+    const lastSlash = filePath.lastIndexOf('/');
+    const dir = lastSlash >= 0 ? filePath.substring(0, lastSlash) : '';
+    const filename = lastSlash >= 0 ? filePath.substring(lastSlash + 1) : filePath;
+
+    const fields: Record<string, string> = { root };
+    if (dir) { fields.path = dir; }
+
+    await httpPostMultipart(url, fields, {
+      fieldName: 'file',
+      filename,
+      content,
+    }, 10_000, this.apiHeaders);
+  }
+
+  async fetchGcodeFiles(): Promise<GcodeFileInfo[]> {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = await httpGet(`${this.baseUrl}/server/files/list`, 5000, this.apiHeaders) as any;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    return (data?.result ?? []).map((f: any) => ({
+      path: f.path as string,
+      modified: f.modified as number,
+      size: f.size as number,
+    }));
+  }
+
+  async fetchJobQueue(): Promise<void> {
+    try {
+      const url = `${this.baseUrl}/server/job_queue/status`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await httpGet(url, 5000, this.apiHeaders) as any;
+      const result = data?.result ?? {};
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const queuedJobs: JobQueueEntry[] = (result.queued_jobs ?? []).map((j: any) => ({
+        filename: j.filename,
+        jobId: j.job_id,
+        timeAdded: j.time_added,
+        timeInQueue: j.time_in_queue,
+      }));
+      this.emit('jobQueue', {
+        queueState: result.queue_state ?? 'paused',
+        queuedJobs,
+      } as JobQueueStatus);
+    } catch (e) {
+      this.outputChannel.appendLine(`Job queue fetch failed: ${e}`);
+    }
+  }
+
+  async enqueueJobs(filenames: string[]): Promise<void> {
+    await httpPost(`${this.baseUrl}/server/job_queue/job`, { filenames }, 5000, this.apiHeaders);
+    void this.fetchJobQueue();
+  }
+
+  async removeFromQueue(jobIds: string[]): Promise<void> {
+    const ids = jobIds.map(encodeURIComponent).join(',');
+    await httpDelete(`${this.baseUrl}/server/job_queue/job?job_ids=${ids}`, 5000, this.apiHeaders);
+    void this.fetchJobQueue();
+  }
+
+  async clearJobQueue(): Promise<void> {
+    await httpDelete(`${this.baseUrl}/server/job_queue/job?all=true`, 5000, this.apiHeaders);
+    void this.fetchJobQueue();
+  }
+
+  async startQueue(): Promise<void> {
+    await httpPost(`${this.baseUrl}/server/job_queue/start`, {}, 5000, this.apiHeaders);
+    void this.fetchJobQueue();
+  }
+
+  async pauseQueue(): Promise<void> {
+    await httpPost(`${this.baseUrl}/server/job_queue/pause`, {}, 5000, this.apiHeaders);
+    void this.fetchJobQueue();
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────
@@ -229,7 +454,7 @@ export class MoonrakerClient extends EventEmitter {
       if (!this.connected || !this.posVizEnabled) { return; }
       try {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const data = await httpGet(`${this.baseUrl}/printer/objects/query?motion_report`, 2000) as any;
+        const data = await httpGet(`${this.baseUrl}/printer/objects/query?motion_report`, 2000, this.apiHeaders) as any;
         const pos = data?.result?.status?.motion_report?.live_position as number[] | undefined;
         if (pos) { this.emit('position', { x: pos[0], y: pos[1], z: pos[2] }); }
       } catch { /* silent — position errors don't affect main connection */ }
@@ -267,7 +492,7 @@ export class MoonrakerClient extends EventEmitter {
     try {
       const metaUrl = `${this.baseUrl}/server/files/thumbnails?filename=${encodeURIComponent(filename)}`;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const meta = await httpGet(metaUrl) as any;
+      const meta = await httpGet(metaUrl, 5000, this.apiHeaders) as any;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const thumbs: Array<{ width: number; height: number; size: number; thumbnail_path: string }> =
         meta?.result ?? [];
@@ -275,8 +500,8 @@ export class MoonrakerClient extends EventEmitter {
 
       // Pick the largest (highest quality) thumbnail
       const thumb = thumbs.reduce((a, b) => (a.size > b.size ? a : b));
-      const imageUrl = `${this.baseUrl}/server/files/${thumb.thumbnail_path}`;
-      const buf = await httpGetBuffer(imageUrl);
+      const imageUrl = `${this.baseUrl}/server/files/gcodes/${thumb.thumbnail_path}`;
+      const buf = await httpGetBuffer(imageUrl, this.apiHeaders);
       // Detect PNG vs JPEG by magic bytes
       const mime = buf[0] === 0x89 ? 'image/png' : 'image/jpeg';
       return `data:${mime};base64,${buf.toString('base64')}`;
@@ -286,11 +511,29 @@ export class MoonrakerClient extends EventEmitter {
     }
   }
 
+  private async fetchMacros(): Promise<void> {
+    try {
+      const url = `${this.baseUrl}/printer/objects/list`;
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const data = await httpGet(url, 5000, this.apiHeaders) as any;
+      const objects: string[] = data?.result?.objects ?? [];
+      const prefix = 'gcode_macro ';
+      const macros = objects
+        .filter((o: string) => o.startsWith(prefix))
+        .map((o: string) => o.slice(prefix.length))
+        .filter((name: string) => !name.startsWith('_'))
+        .sort((a: string, b: string) => a.localeCompare(b));
+      this.emit('macros', macros);
+    } catch (e) {
+      this.outputChannel.appendLine(`Macro fetch failed: ${e}`);
+    }
+  }
+
   private async fetchPrintHistory(): Promise<void> {
     try {
       const url = `${this.baseUrl}/server/history/list?limit=5&order=desc`;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await httpGet(url) as any;
+      const data = await httpGet(url, 5000, this.apiHeaders) as any;
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const jobs: PrintHistoryEntry[] = (data?.result?.jobs ?? []).map((j: any) => ({
         jobId: j.job_id,
@@ -309,7 +552,7 @@ export class MoonrakerClient extends EventEmitter {
   private async poll(): Promise<void> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const data = await httpGet(this.buildQueryUrl()) as any;
+      const data = await httpGet(this.buildQueryUrl(), 5000, this.apiHeaders) as any;
       const s = data?.result?.status ?? {};
 
       if (!this.connected) {
@@ -317,6 +560,8 @@ export class MoonrakerClient extends EventEmitter {
         this.emit('connected');
         this.outputChannel.appendLine(`Connected to Moonraker at ${this.baseUrl}`);
         void this.fetchPrintHistory();
+        void this.fetchMacros();
+        void this.fetchJobQueue();
         this.startPositionPoll();
       }
 
@@ -364,9 +609,10 @@ export class MoonrakerClient extends EventEmitter {
         }
       }
 
-      // ── Print history: re-fetch when a print finishes ─────────────────────
-      if (state === 'finished' && this.lastState !== 'finished') {
-        void this.fetchPrintHistory();
+      // ── Print history & job queue: re-fetch on state transitions ──────────
+      if (state !== this.lastState) {
+        if (state === 'finished') { void this.fetchPrintHistory(); }
+        void this.fetchJobQueue();
       }
       this.lastState = state;
 

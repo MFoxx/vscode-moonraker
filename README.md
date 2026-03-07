@@ -59,6 +59,12 @@ Stop alt-tabbing to your slicer or browser. The sidebar panel shows **hotend, be
 ### 🖼️ Thumbnail Previews
 Automatically fetches the **G-code thumbnail** for the currently printing file and displays it in the sidebar. You always know what's on the plate.
 
+> **Note:** Your slicer must embed thumbnails in the G-code file. Enable this in your slicer settings:
+> - **OrcaSlicer** — Printer Settings → Basic information → Thumbnails for color print ([wiki](https://github.com/OrcaSlicer/OrcaSlicer/wiki/))
+> - **PrusaSlicer** — Printer Settings → General → G-code thumbnails (add sizes like `32x32, 300x300`)
+> - **Cura** — Install the [Cura Thumbnails](https://marketplace.ultimaker.com/app/cura/plugins/fieldofview/ThingiBrowsePlugin) plugin
+> - **SuperSlicer** — Printer Settings → General → G-code thumbnails
+
 ### 📁 Recent Print History
 A collapsible section shows your **last 5 prints** — filename, duration, completion date, and whether they succeeded or failed. Collapsed by default, out of the way when you don't need it.
 
@@ -72,6 +78,18 @@ Never miss a state change. VS Code toast notifications tell you when:
 ### 🌐 Web UI Shortcut
 Configure your Mainsail or Fluidd URL once and get a **one-click button** in the sidebar to open it. Customize the label too (`Open Mainsail`, `Open Fluidd`, whatever you like).
 
+### 🎛️ Klipper Macro Buttons
+Your custom Klipper macros are **auto-discovered** and displayed as one-click buttons in a collapsible sidebar section. Internal macros (prefixed with `_`) are hidden automatically.
+
+### 📝 Config File Editor
+Edit your printer configuration files — `printer.cfg`, `moonraker.conf`, and more — without leaving VS Code. Open the command palette and run **"Moonraker: Edit Printer Config File"** to browse all config files on the printer. Files open in VS Code's native editor with full syntax support, and **Ctrl+S saves directly back to the printer**. After saving, you're prompted to restart firmware or the host to apply changes.
+
+### 📜 Printer Log Viewer
+View Klipper and Moonraker log files without SSH or a file manager. Click **"Show Logs"** in the sidebar or run **"Moonraker: Show Printer Logs"** from the command palette to browse all log files on the printer. Select a file and it opens directly in VS Code's editor — searchable, scrollable, and syntax-highlighted.
+
+### 📋 Job Queue Management
+Manage Moonraker's print queue directly from the sidebar. A collapsible **Job Queue** section shows the current queue state and all queued jobs. **Add files** from existing G-codes on the printer (multi-select supported), **start or pause** the queue, **remove individual jobs**, or **clear the entire queue** — all without opening the web UI. The queue updates automatically when prints finish or the printer state changes.
+
 ### 📍 Status Bar Integration
 Keep an eye on your printer without even opening the sidebar. The **status bar** shows printer state, temperatures, filename, ETA, and elapsed time. Every item is individually configurable — show only what matters to you.
 
@@ -83,11 +101,11 @@ These are features actively planned for future releases. Have a suggestion? [Ope
 
 | Feature | Description |
 |---|---|
-| 🔐 **Authentication / API token** | Connect to Moonraker instances secured with an API key or trusted clients config |
+| ~~🔐 **Authentication / API token**~~ | ✅ Shipped in v0.2.0 — set `moonraker.apiKey` to connect to secured instances |
 | 📷 **Webcam snapshot** | Display a periodically refreshed camera image in the sidebar so you can see your print at a glance |
-| 🎛️ **Klipper macro buttons** | Auto-discover and expose your custom Klipper macros as one-click sidebar buttons |
+| ~~🎛️ **Klipper macro buttons**~~ | ✅ Shipped in v0.2.0 — macros are auto-discovered and shown as one-click sidebar buttons |
 | 🖨️ **Multi-printer support** | Monitor and switch between multiple printers from a single VS Code sidebar |
-| ▶️ **Print queue & quick-start** | Browse files already on the printer and start or queue a print without opening the web UI |
+| ~~▶️ **Print queue & quick-start**~~ | ✅ Shipped in v0.2.0 — collapsible sidebar section to manage the print queue with add, start/pause, remove, and clear |
 
 ---
 
@@ -151,6 +169,7 @@ That's it. No config files, no setup scripts.
 |---|---|---|
 | `moonraker.apiUrl` | `http://localhost` | Moonraker API base URL (no port) |
 | `moonraker.port` | `7125` | Moonraker API port |
+| `moonraker.apiKey` | _(empty)_ | API key for authenticated Moonraker instances ([how to get your key](https://moonraker.readthedocs.io/en/latest/installation/#retrieving-the-api-key)) |
 | `moonraker.pollingInterval` | `2000` | Status poll interval in ms |
 | `moonraker.temperatureHistorySize` | `120` | Number of points in the temperature chart |
 | `moonraker.chamberSensorName` | _(empty)_ | Klipper `temperature_sensor` name for chamber monitoring |
@@ -209,11 +228,12 @@ npm run watch
 
 ```
 src/
-├── extension.ts        # Entry point, command registration, event wiring
-├── moonrakerClient.ts  # Moonraker HTTP polling, event emitter
-├── sidebarProvider.ts  # Webview sidebar (HTML/CSS/JS)
-├── statusBar.ts        # Status bar items
-└── test/               # Jest unit tests
+├── extension.ts          # Entry point, command registration, event wiring
+├── moonrakerClient.ts    # Moonraker HTTP polling, event emitter
+├── sidebarProvider.ts    # Webview sidebar (HTML/CSS/JS)
+├── statusBar.ts          # Status bar items
+├── configFileProvider.ts # FileSystemProvider for remote config editing
+└── test/                 # Jest unit tests
 ```
 
 ---
